@@ -11,6 +11,7 @@
 #include <time.h>
 #include <algorithm>
 #include <set>
+#include <filesystem>
 
 #ifdef _MSC_VER
 struct IUnknown; // workaround for old Win SDK header failures when using /permissive-
@@ -142,6 +143,22 @@ struct JsonFileFinder
         files.emplace_back(path);
     }
 
+    void OnFile(const std::filesystem::directory_entry& f)
+    {
+        // extension has to be json
+        const auto& ext = f.path().extension();
+        if (ext != ".json")
+            return;
+
+        // modification time between our session start & end
+        auto ft = f.last_write_time();
+        std::time_t f_last_write_time = decltype(ft)::clock::to_time_t(ft);
+        if ( f_last_write_time < startTime ||  f_last_write_time > endTime)
+            return;
+        
+        files.emplace_back(f.path().lexically_normal());
+    }
+    
     static void Callback(cf_file_t* f, void* userData)
     {
         JsonFileFinder* self = (JsonFileFinder*)userData;
@@ -184,7 +201,10 @@ static int RunStop(int argc, const char* argv[])
     JsonFileFinder jsonFiles;
     jsonFiles.startTime = startTime;
     jsonFiles.endTime = stopTime;
-    cf_traverse(artifactsDir.c_str(), JsonFileFinder::Callback, &jsonFiles);
+
+    for(auto& p: std::filesystem::recursive_directory_iterator(artifactsDir)){
+        jsonFiles.OnFile(p);
+    }
     if (jsonFiles.files.empty())
     {
         printf("%sERROR: no .json files found under '%s'.%s\n", col::kRed, artifactsDir.c_str(), col::kReset);
